@@ -85,7 +85,46 @@ bash acc/run_compare.sh
 - `edgellm.json` / `edgellm.log`
 - `summary.json`
 
-## 目录结构
+---
+
+## 实测对比结论（AGX Orin）
+
+**测试条件（两侧一致）**
+
+| 项 | 值 |
+|----|-----|
+| 模型 | Qwen2.5-0.5B-Instruct（FP16） |
+| Prompt | `用一句话介绍 NVIDIA Jetson AGX Orin。` |
+| max_new_tokens | 128 |
+| warmup / runs | 10 / 30 |
+| 实际输出 | 52 tokens（两侧相同，见下方样例） |
+| HF | PyTorch 2.5 + Transformers 4.x，`attn_implementation=eager` |
+| Edge-LLM | TensorRT FP16 引擎（x86 导出 ONNX → Orin `llm_build`） |
+
+**性能对比（30 次平均）**
+
+| 指标 | Transformers | TensorRT Edge-LLM | Edge-LLM 相对 HF |
+|------|--------------|-------------------|------------------|
+| TTFT | **75.2 ms** | **39.0 ms** | **1.93× 更快**（约 −48%） |
+| Decode 吞吐 | **14.4 tokens/s** | **34.6 tokens/s** | **2.40×** |
+| E2E 吞吐 | **14.1 tokens/s** | **33.7 tokens/s** | **2.39×** |
+| 总延迟 | 3680 ms | 1542 ms | **2.39× 更快** |
+| Peak GPU 显存 | **974 MB** | —（C++ runtime 未统计） | — |
+| 输出 tokens | 52 | 52 | 一致 |
+
+**结论**
+
+1. **吞吐**：在相同 prompt 与生成上限下，Edge-LLM E2E 约 **2.4×** 于 Transformers（33.7 vs 14.1 tokens/s），decode 阶段约 **2.4×**。
+2. **首 token 延迟**：TTFT 从 ~75 ms 降至 ~39 ms，约 **快 1.9×**。
+3. **输出一致性**：两侧 `sample_output` 文本相同（52 token 中文简介），说明 FP16 引擎在该任务上结果与 HF 基线一致。
+4. **适用场景**：0.5B 小模型在 Orin 上 Edge-LLM 收益明显；HF 仍占 ~974 MB 显存（含 PyTorch 运行时），Edge-LLM 为纯 C++ 推理路径，部署侧更轻。
+5. **方法说明**：Edge-LLM 指标来自 `llm_inference --dumpProfile`（非 wall-clock 冷启动）；HF 为 Python 进程内计时。完整 raw 数据见 `results/hf.json`、`results/edgellm.json`。
+
+样例输出（两侧相同）：
+
+> NVIDIA Jetson AGX Orin 是一款专为 AI 和机器学习应用设计的高性能计算平台，集成了最新的 NVIDIA Jetson 平台架构，提供强大的计算能力和灵活的扩展性，适用于各种 AI 和机器学习项目。
+
+---
 
 ```
 qwen06_acc_agx/

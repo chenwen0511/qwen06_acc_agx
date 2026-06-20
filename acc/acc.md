@@ -88,6 +88,42 @@ bash acc/build_engine.sh
 
 产出：`acc/workspace/engine/`
 
+### 实测日志（Orin AGX，2026-06-20）
+
+命令：`bash acc/build_engine.sh`（ONNX 来源：x86 主机 `export_onnx_host.sh` 导出后 scp 至 `acc/workspace/onnx/`）
+
+| 项 | 值 |
+|----|-----|
+| 构建耗时 | **87.9 s** |
+| 权重显存 | 1076146176 B（≈ **1.00 GiB**） |
+| TRT 分配器峰值 | GPU **1026 MiB**，CPU 0 MiB |
+| 构建+序列化峰值 | CPU **4901 MiB** |
+| 网络 I/O | 29 inputs / 25 outputs |
+| Activation Memory | prefill **66063360 B**，decode **1585152 B** |
+| 插件 | AttentionPlugin ×24（DLA fallback → GPU） |
+
+产出目录 `acc/workspace/engine/`：
+
+| 文件 | 大小 |
+|------|------|
+| `llm.engine` | 1,089,994,884 B（≈ **1.01 GiB**） |
+| `embedding.safetensors` | 272,269,400 B（≈ **260 MiB**） |
+| `tokenizer.json` | 7,031,645 B |
+| `tokenizer_config.json` | 7,305 B |
+| `processed_chat_template.json` | 546 B |
+| `config.json` | 727 B |
+
+关键日志摘录：
+
+```
+[21:30:27.874] [INFO] [TensorRT] Total Weights Memory: 1076146176
+[21:30:27.880] [INFO] [TensorRT] Engine generation completed in 87.9465 seconds.
+[21:30:27.882] [INFO] [TensorRT] [MemUsageStats] Peak memory usage of TRT CPU/GPU memory allocators: CPU 0 MiB, GPU 1026 MiB
+[21:30:28.249] [INFO] [TensorRT] [MemUsageStats] Peak memory usage during Engine building and serialization: CPU: 4901 MiB
+[21:30:29.433] [INFO] [builderUtils.cpp:328:buildAndSerializeEngine] Engine saved to .../acc/workspace/engine/llm.engine
+[21:30:30.110] [INFO] [llm_build.cpp:246:main] LLM engine built successfully.
+```
+
 ---
 
 ## 步骤 4：Benchmark

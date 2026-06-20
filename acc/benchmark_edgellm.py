@@ -74,18 +74,21 @@ def extract_response_text(output_path: str) -> str:
     if isinstance(data, dict):
         responses = data.get("responses", [])
         if responses and isinstance(responses[0], dict):
-            return responses[0].get("text", "")
+            resp = responses[0]
+            for key in ("output_text", "text"):
+                value = resp.get(key)
+                if value:
+                    return str(value)
         if "text" in data:
             return str(data["text"])
-    return json.dumps(data, ensure_ascii=False)
+    return ""
 
 
-def parse_bench_ms(output: str, mode: str) -> float | None:
+def parse_bench_ms(output: str) -> float | None:
     patterns = [
-        rf"{mode}.*?([0-9]+(?:\.[0-9]+)?)\s*ms",
-        rf"{mode} latency.*?([0-9]+(?:\.[0-9]+)?)",
-        r"latency\s*=\s*([0-9]+(?:\.[0-9]+)?)\s*ms",
-        r"([0-9]+(?:\.[0-9]+)?)\s*ms",
+        r"E2E Time \(actual performance\):\s*([0-9]+(?:\.[0-9]+)?)\s*ms",
+        r"Prefill.*?([0-9]+(?:\.[0-9]+)?)\s*ms",
+        r"decode.*?([0-9]+(?:\.[0-9]+)?)\s*ms",
     ]
     for pattern in patterns:
         match = re.search(pattern, output, flags=re.IGNORECASE)
@@ -103,22 +106,42 @@ def run_llm_bench(
 ) -> tuple[float | None, str]:
     if not llm_bench or not os.path.isfile(llm_bench):
         return None, ""
-    cmd = [
+    common = [
         llm_bench,
         "--engineDir",
         engine_dir,
-        "--mode",
-        mode,
-        "--inputLen",
-        str(input_len),
-        "--outputLen",
-        str(output_len),
         "--batchSize",
         "1",
+        "--iterations",
+        "10",
+        "--warmup",
+        "3",
     ]
+    if mode == "prefill":
+        cmd = common + [
+            "--mode",
+            "prefill",
+            "--inputLen",
+            str(input_len),
+            "--reuseKVLen",
+            "0",
+        ]
+    elif mode == "decode":
+        cmd = common + [
+            "--mode",
+            "decode",
+            "--pastKVLen",
+            str(input_len),
+            "--osl",
+            str(output_len),
+        ]
+    else:
+        return None, f"unsupported llm_bench mode: {mode}"
     proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
     output = (proc.stdout or "") + (proc.stderr or "")
-    return parse_bench_ms(output, mode), output
+    if proc.returncode != 0:
+        return None, output
+    return parse_bench_ms(output), output
 
 
 def build_input_json(path: str, prompt: str, max_new_tokens: int) -> None:
@@ -128,6 +151,8 @@ def build_input_json(path: str, prompt: str, max_new_tokens: int) -> None:
         "top_p": 1.0,
         "top_k": 1,
         "max_generate_length": max_new_tokens,
+        "apply_chat_template": True,
+        "add_generation_prompt": True,
         "requests": [{"messages": [{"role": "user", "content": prompt}]}],
     }
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
@@ -140,41 +165,75 @@ def run_inference_once(
     engine_dir: str,
     input_path: str,
     output_path: str,
-) -> tuple[float, str]:
-    if os.path.exists(output_path):
-        os.remove(output_path)
+    profile_path: str | None = None,
+) -> tuple[float, str, dict[str, Any]]:
+    for path in (output_path, profile_path):
+        if path and os.path.exists(path):
+            os.remove(path)
+    cmd = [
+        llm_inference,
+        "--engineDir",
+        engine_dir,
+        "--inputFile",
+        input_path,
+        "--outputFile",
+        output_path,
+        "--dumpProfile",
+    ]
+    if profile_path:
+        cmd.extend(["--profileOutputFile", profile_path])
     start = time.perf_counter()
-    proc = subprocess.run(
-        [
-            llm_inference,
-            "--engineDir",
-            engine_dir,
-            "--inputFile",
-            input_path,
-            "--outputFile",
-            output_path,
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
     elapsed_ms = (time.perf_counter() - start) * 1000
     if proc.returncode != 0:
         raise RuntimeError(
             f"llm_inference failed ({proc.returncode}):\n{proc.stdout}\n{proc.stderr}"
         )
     text = extract_response_text(output_path)
-    return elapsed_ms, text
+    profile: dict[str, Any] = {}
+    if profile_path and os.path.isfile(profile_path):
+        with open(profile_path, encoding="utf-8") as f:
+            profile = json.load(f)
+    return elapsed_ms, text, profile
+
+
+def metrics_from_profile(profile: dict[str, Any]) -> RunMetrics | None:
+    prefill = profile.get("prefill")
+    generation = profile.get("generation")
+    if not prefill or not generation:
+        return None
+    ttft_ms = float(prefill["average_time_per_run_ms"])
+    output_tokens = int(generation.get("generated_tokens", 0))
+    decode_tps = float(generation.get("tokens_per_second", 0.0))
+    avg_token_ms = float(generation.get("average_time_per_token_ms", 0.0))
+    decode_ms = avg_token_ms * output_tokens if output_tokens > 0 else 0.0
+    total_ms = ttft_ms + decode_ms
+    if output_tokens <= 0 or decode_tps <= 0:
+        return None
+    return RunMetrics(
+        ttft_ms=ttft_ms,
+        decode_ms=decode_ms,
+        total_ms=total_ms,
+        output_tokens=output_tokens,
+        decode_tokens_per_sec=decode_tps,
+        e2e_tokens_per_sec=output_tokens / (total_ms / 1000) if total_ms > 0 else 0.0,
+    )
 
 
 def estimate_metrics(
-    total_ms: float,
+    wall_ms: float,
     prompt: str,
     output_text: str,
     tokenizer_dir: str,
+    profile: dict[str, Any] | None,
     bench_prefill_ms: float | None,
     bench_decode_ms: float | None,
 ) -> RunMetrics:
+    if profile:
+        derived = metrics_from_profile(profile)
+        if derived is not None:
+            return derived
+
     from transformers import AutoTokenizer
 
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_dir, trust_remote_code=True)
@@ -187,18 +246,24 @@ def estimate_metrics(
         prompt_text = prompt
     input_tokens = len(tokenizer.encode(prompt_text))
     output_tokens = len(tokenizer.encode(output_text, add_special_tokens=False))
-    output_tokens = max(output_tokens, 1)
 
     if bench_prefill_ms is not None and bench_decode_ms is not None:
         ttft_ms = bench_prefill_ms
         decode_ms = bench_decode_ms
+        total_ms = ttft_ms + decode_ms
     else:
+        total_ms = wall_ms
         denom = max(input_tokens + output_tokens, 1)
         ttft_ms = total_ms * input_tokens / denom
         decode_ms = total_ms - ttft_ms
 
-    decode_tps = output_tokens / (decode_ms / 1000) if decode_ms > 0 else 0.0
-    e2e_tps = output_tokens / (total_ms / 1000) if total_ms > 0 else 0.0
+    if output_tokens <= 0:
+        output_tokens = 0
+        decode_tps = 0.0
+        e2e_tps = 0.0
+    else:
+        decode_tps = output_tokens / (decode_ms / 1000) if decode_ms > 0 else 0.0
+        e2e_tps = output_tokens / (total_ms / 1000) if total_ms > 0 else 0.0
     return RunMetrics(
         ttft_ms=ttft_ms,
         decode_ms=decode_ms,
@@ -268,12 +333,20 @@ def main() -> int:
         llm_bench, args.engine_dir, "prefill", prompt_tokens, args.max_new_tokens
     )
     decode_ms, decode_log = run_llm_bench(
-        llm_bench, args.engine_dir, "generation", prompt_tokens, args.max_new_tokens
+        llm_bench, args.engine_dir, "decode", prompt_tokens, args.max_new_tokens
     )
-    if prefill_log:
+    if prefill_ms is None and prefill_log:
+        print("[WARN] llm_bench prefill 未解析到耗时，请检查参数")
+    if decode_ms is None and decode_log:
+        print("[WARN] llm_bench decode 未解析到耗时，将使用 llm_inference profile")
+    if prefill_log and prefill_ms is not None:
+        print(f"llm_bench prefill E2E: {prefill_ms:.2f} ms")
+    elif prefill_log:
         print("llm_bench prefill:\n" + prefill_log.strip()[-500:])
-    if decode_log:
-        print("llm_bench generation:\n" + decode_log.strip()[-500:])
+    if decode_log and decode_ms is not None:
+        print(f"llm_bench decode E2E: {decode_ms:.2f} ms")
+    elif decode_log:
+        print("llm_bench decode:\n" + decode_log.strip()[-500:])
 
     print(f"\n预热 {args.warmup} 次...")
     for i in range(args.warmup):
@@ -281,28 +354,36 @@ def main() -> int:
         run_inference_once(llm_inference, args.engine_dir, input_json, out_path)
         print(f"  warmup {i + 1}/{args.warmup} done")
 
-    print(f"\n批量推理 {args.runs} 次（计时）...")
+    print(f"\n批量推理 {args.runs} 次（计时，使用 llm_inference profile）...")
     runs: list[RunMetrics] = []
     last_text = ""
     for i in range(args.runs):
         out_path = os.path.join(results_dir, f"edgellm_run_{i}.json")
-        total_ms, last_text = run_inference_once(
-            llm_inference, args.engine_dir, input_json, out_path
+        profile_path = os.path.join(results_dir, f"edgellm_profile_{i}.json")
+        wall_ms, last_text, profile = run_inference_once(
+            llm_inference,
+            args.engine_dir,
+            input_json,
+            out_path,
+            profile_path=profile_path,
         )
         metrics = estimate_metrics(
-            total_ms,
+            wall_ms,
             args.prompt,
             last_text,
             args.tokenizer_dir,
+            profile,
             prefill_ms,
             decode_ms,
         )
         runs.append(metrics)
         print(
             f"  run {i + 1}/{args.runs}: "
-            f"total={metrics.total_ms:.2f} ms, "
+            f"ttft={metrics.ttft_ms:.2f} ms, "
+            f"decode={metrics.decode_ms:.2f} ms, "
             f"tokens={metrics.output_tokens}, "
-            f"e2e_tps={metrics.e2e_tokens_per_sec:.2f}"
+            f"decode_tps={metrics.decode_tokens_per_sec:.2f}, "
+            f"wall={wall_ms:.0f} ms"
         )
 
     payload = {

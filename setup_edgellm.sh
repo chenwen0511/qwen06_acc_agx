@@ -99,10 +99,11 @@ clone_or_update_edgellm
 prepare_edgellm_requirements() {
   local req_filtered="/tmp/edgellm-reqs.txt"
   # Jetson venv 使用 PyTorch 3.10 + Jetson wheel；Edge-LLM 上游 requirements 面向 py3.11+
-  grep -v -E '^(torch|numpy)([=<>].*)?$' requirements.txt > "$req_filtered"
-  echo ">>> Edge-LLM Python 依赖（已剔除 torch/numpy，沿用 Jetson venv 已有版本）"
+  grep -v -E '^(torch|numpy|transformers)([=<>].*)?$' requirements.txt > "$req_filtered"
+  echo ">>> Edge-LLM Python 依赖（已剔除 torch/numpy/transformers，Orin 沿用项目 requirements）"
   cat "$req_filtered"
   pip install -r "$req_filtered"
+  pip install 'transformers>=4.45.0,<5.0'
   python3 - <<'PY'
 import numpy
 print(f"numpy {numpy.__version__} (Jetson venv)")

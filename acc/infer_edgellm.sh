@@ -29,7 +29,7 @@ setup_edgellm_env
 
 python3 "$ACC_DIR/benchmark_edgellm.py" \
   --engine-dir "$ENGINE_DIR" \
-  --tokenizer-dir "$MODEL_DIR" \
+  --tokenizer-dir "$ENGINE_DIR" \
   --prompt "$PROMPT" \
   --max-new-tokens "$MAX_NEW_TOKENS" \
   --warmup "$WARMUP" \
