@@ -12,7 +12,40 @@ cd "$ROOT"
 
 EDGELLM_SRC="${EDGELLM_SRC:-$ROOT/third_party/TensorRT-Edge-LLM}"
 EDGELLM_TAG="${EDGELLM_TAG:-main}"
-TORCH_CUDA="${TORCH_CUDA:-cu124}"
+TORCH_VERSION="${TORCH_VERSION:-2.12.0}"
+# PyTorch 2.12 不在 cu124 索引；默认依次尝试 cu130 / cu126
+TORCH_CUDA="${TORCH_CUDA:-}"
+
+install_torch() {
+  local -a indices=()
+  if [ -n "$TORCH_CUDA" ]; then
+    indices=("$TORCH_CUDA")
+  else
+    indices=(cu130 cu126)
+  fi
+
+  local idx
+  for idx in "${indices[@]}"; do
+    echo ">>> 尝试 torch==${TORCH_VERSION} (${idx}, py$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")'))"
+    if pip install "torch==${TORCH_VERSION}" \
+      --index-url "https://download.pytorch.org/whl/${idx}"; then
+      echo ">>> 已安装 torch ${TORCH_VERSION} from ${idx}"
+      return 0
+    fi
+    echo "[WARN] ${idx} 无匹配 wheel，尝试下一个索引..."
+  done
+
+  cat >&2 <<EOF
+[ERROR] 无法安装 torch==${TORCH_VERSION}
+
+PyTorch 2.12 不在 cu124 索引（最高仅 2.6）。请指定:
+  TORCH_CUDA=cu126 bash acc/setup_export_host.sh --conda
+  TORCH_CUDA=cu130 bash acc/setup_export_host.sh --conda
+
+当前 Python: $(python3 --version)
+EOF
+  exit 1
+}
 
 install_docker_toolkit() {
   echo ">>> 安装 nvidia-container-toolkit"
@@ -58,11 +91,10 @@ ensure_edgellm_src() {
 install_edgellm_python() {
   ensure_edgellm_src
   local req_filtered="/tmp/edgellm-export-reqs.txt"
-  grep -v -E '^(torch|numpy)([=<>].*)?$' "$EDGELLM_SRC/requirements.txt" > "$req_filtered"
+  grep -v -E '^torch([=<>].*)?$' "$EDGELLM_SRC/requirements.txt" > "$req_filtered"
 
-  echo ">>> 安装 PyTorch 2.12 (${TORCH_CUDA})"
   pip install --upgrade pip
-  pip install "torch==2.12.0" --index-url "https://download.pytorch.org/whl/${TORCH_CUDA}"
+  install_torch
 
   echo ">>> 安装 Edge-LLM Python 包"
   cd "$EDGELLM_SRC"
@@ -84,7 +116,7 @@ PY
   echo ""
   echo "导出环境就绪。运行:"
   echo "  export QWEN_MODEL_DIR=/path/to/Qwen2.5-0.5B-Instruct"
-  echo "  bash acc/export_onnx_host.sh"
+  echo "  USE_CURRENT_ENV=1 bash acc/export_onnx_host.sh"
 }
 
 setup_venv_export() {
