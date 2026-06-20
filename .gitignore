@@ -5,4 +5,7 @@ __pycache__/
 *.pyc
 results/
 acc/workspace/
+inference/artifacts/
+inference/runtime/
+inference/output/
 *.tar.xz

@@ -1,0 +1,19 @@
+{
+  "batch_size": 1,
+  "temperature": 0.0,
+  "top_p": 1.0,
+  "top_k": 1,
+  "max_generate_length": 128,
+  "apply_chat_template": true,
+  "add_generation_prompt": true,
+  "requests": [
+    {
+      "messages": [
+        {
+          "role": "user",
+          "content": "用一句话介绍 NVIDIA Jetson AGX Orin。"
+        }
+      ]
+    }
+  ]
+}

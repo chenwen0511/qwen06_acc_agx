@@ -75,54 +75,100 @@ bash acc/infer_edgellm.sh    # llm_inference + llm_bench
 
 ### 5. 一键对比
 
+单条 prompt（默认 `prompts.json` 的 `short`）：
+
 ```bash
 bash acc/run_compare.sh
+# 或指定 key：PROMPT_KEY=medium bash acc/run_compare.sh
 ```
 
-结果输出到 `results/`：
+快速冒烟（推荐，约 1–2 分钟/prompt）：
 
-- `hf.json` / `hf.log`
-- `edgellm.json` / `edgellm.log`
-- `summary.json`
+```bash
+WARMUP=2 RUNS=5 bash acc/run_compare.sh
+WARMUP=2 RUNS=5 bash acc/run_prompts.sh   # 遍历 short / medium / long
+```
+
+全量 benchmark（正式对比，约 5–8 分钟/prompt）：
+
+```bash
+WARMUP=10 RUNS=30 bash acc/run_compare.sh
+```
+
+结果输出到 `results/`（多 prompt 时在 `results/<key>/`）：
+
+- `hf.json` / `edgellm.json` / `summary.json`
+- 全 prompt 汇总：`results/summary_all.json`（需跑完 `run_prompts.sh`）
+
+### 6. 第二块 AGX 推理（最小步骤）
+
+见 [`inference/README.md`](inference/README.md)。概要：
+
+```bash
+# 首块 AGX
+bash inference/pack_artifacts.sh
+scp inference/artifacts/qwen06_edgellm_orin.tar.gz admin@<新板IP>:~/.../inference/artifacts/
+
+# 新 AGX
+bash inference/install.sh && bash inference/run.sh
+```
 
 ---
 
 ## 实测对比结论（AGX Orin）
 
-**测试条件（两侧一致）**
+### 测试配置
 
 | 项 | 值 |
 |----|-----|
-| 模型 | Qwen2.5-0.5B-Instruct（FP16） |
-| Prompt | `用一句话介绍 NVIDIA Jetson AGX Orin。` |
+| 模型 | Qwen2.5-0.5B-Instruct（FP16 引擎） |
+| Prompt 来源 | `prompts.json` → **short**（一句话介绍 Orin） |
 | max_new_tokens | 128 |
-| warmup / runs | 10 / 30 |
-| 实际输出 | 52 tokens（两侧相同，见下方样例） |
+| warmup / runs | **10 / 30**（下文数据）；日常建议 **2 / 5** |
 | HF | PyTorch 2.5 + Transformers 4.x，`attn_implementation=eager` |
-| Edge-LLM | TensorRT FP16 引擎（x86 导出 ONNX → Orin `llm_build`） |
+| Edge-LLM | x86 导出 ONNX → Orin `llm_build`，指标来自 `llm_inference --dumpProfile` |
 
-**性能对比（30 次平均）**
+`prompts.json` 另含 **medium**、**long**（更长输入，单次 HF 推理更慢）。全量 `WARMUP=10 RUNS=30` 跑三条 × 双后端约 **30–60+ 分钟**，实测仅 **short** 完整跑完；medium 在 HF 阶段被中断。后续请用 `WARMUP=2 RUNS=5 bash acc/run_prompts.sh` 做快速覆盖。
+
+### short prompt 性能（30 次平均）
+
+数据来源：`results/hf.json`、`results/edgellm.json`（与 `results/short/` 复测一致，加速比 ~**2.3–2.4×**）。
 
 | 指标 | Transformers | TensorRT Edge-LLM | Edge-LLM 相对 HF |
 |------|--------------|-------------------|------------------|
-| TTFT | **75.2 ms** | **39.0 ms** | **1.93× 更快**（约 −48%） |
+| TTFT | **75.2 ms** | **39.0 ms** | **1.93× 更快** |
 | Decode 吞吐 | **14.4 tokens/s** | **34.6 tokens/s** | **2.40×** |
 | E2E 吞吐 | **14.1 tokens/s** | **33.7 tokens/s** | **2.39×** |
 | 总延迟 | 3680 ms | 1542 ms | **2.39× 更快** |
-| Peak GPU 显存 | **974 MB** | —（C++ runtime 未统计） | — |
+| Peak GPU 显存 | **974 MB** | —（C++ 未统计） | — |
 | 输出 tokens | 52 | 52 | 一致 |
 
-**结论**
+### 结论
 
-1. **吞吐**：在相同 prompt 与生成上限下，Edge-LLM E2E 约 **2.4×** 于 Transformers（33.7 vs 14.1 tokens/s），decode 阶段约 **2.4×**。
-2. **首 token 延迟**：TTFT 从 ~75 ms 降至 ~39 ms，约 **快 1.9×**。
-3. **输出一致性**：两侧 `sample_output` 文本相同（52 token 中文简介），说明 FP16 引擎在该任务上结果与 HF 基线一致。
-4. **适用场景**：0.5B 小模型在 Orin 上 Edge-LLM 收益明显；HF 仍占 ~974 MB 显存（含 PyTorch 运行时），Edge-LLM 为纯 C++ 推理路径，部署侧更轻。
-5. **方法说明**：Edge-LLM 指标来自 `llm_inference --dumpProfile`（非 wall-clock 冷启动）；HF 为 Python 进程内计时。完整 raw 数据见 `results/hf.json`、`results/edgellm.json`。
+1. **加速效果**：short prompt 下 Edge-LLM 相对 HF 约 **2.4× 吞吐**、TTFT 约 **快 2×**，与 Qwen2.5-0.5B + Orin FP16 的预期收益一致。
+2. **输出一致**：两侧均生成 52 token，文本相同（见下），FP16 引擎在该任务上与 HF 对齐。
+3. **部署**：HF 固定占用 ~974 MB 显存（含 PyTorch）；Edge-LLM 为 C++ 推理路径，适合边缘部署。
+4. **prompt 长度**：medium/long 输入更长，prefill 与总耗时显著增加；不建议默认 10/30 全量扫三条，用 `WARMUP=2 RUNS=5` 或单 key 测试即可。
+5. **方法差异**：Edge-LLM 为 profile 内计时（不含每次子进程冷启动 ~4 s wall）；HF 为进程内计时。对比吞吐以 profile 指标为准。
 
-样例输出（两侧相同）：
+样例输出（short，两侧相同）：
 
 > NVIDIA Jetson AGX Orin 是一款专为 AI 和机器学习应用设计的高性能计算平台，集成了最新的 NVIDIA Jetson 平台架构，提供强大的计算能力和灵活的扩展性，适用于各种 AI 和机器学习项目。
+
+### prompts.json 覆盖状态
+
+| Key | 说明 | 全量 10/30 | 备注 |
+|-----|------|------------|------|
+| `short` | 一句话介绍 Orin | ✅ 已完成 | 见上表 |
+| `medium` | Transformers vs TRT-LLM 差异 | ⏸ 中断 | 输入更长，HF 单轮 ~数分钟级 |
+| `long` | 嵌入式部署短文 | ⏸ 未跑 | 同上 |
+
+快速补测：
+
+```bash
+WARMUP=2 RUNS=5 PROMPT_KEY=medium bash acc/run_compare.sh
+WARMUP=2 RUNS=5 bash acc/run_prompts.sh && python3 acc/summarize_prompts.py
+```
 
 ---
 
@@ -140,7 +186,9 @@ qwen06_acc_agx/
 │   ├── infer_edgellm.sh
 │   ├── benchmark_edgellm.py
 │   ├── run_compare.sh
+│   ├── run_prompts.sh           # 遍历 prompts.json（默认 2/5 快速）
 │   ├── summarize_results.py
+│   ├── summarize_prompts.py
 │   ├── workspace/                   # onnx + engine 产物
 │   └── acc.md
 └── results/

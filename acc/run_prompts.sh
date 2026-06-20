@@ -1,5 +1,6 @@
 #!/bin/bash
 # 按 prompts.json 中全部 key 依次跑 HF + Edge-LLM 对比
+# 默认 WARMUP=2 RUNS=5（全量 10/30 约 30–60+ 分钟，过长）
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -7,8 +8,8 @@ cd "$ROOT"
 
 PROMPTS_FILE="${PROMPTS_FILE:-$ROOT/prompts.json}"
 MAX_NEW_TOKENS="${MAX_NEW_TOKENS:-128}"
-WARMUP="${WARMUP:-10}"
-RUNS="${RUNS:-30}"
+WARMUP="${WARMUP:-2}"
+RUNS="${RUNS:-5}"
 SKIP_HF="${SKIP_HF:-0}"
 SKIP_EDGELLM="${SKIP_EDGELLM:-0}"
 
