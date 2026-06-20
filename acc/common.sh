@@ -25,9 +25,26 @@ activate_venv() {
   export PATH="$CUDA_HOME/bin:$PATH"
 }
 
-setup_edgellm_env() {
-  activate_venv
+setup_export_env() {
+  export CUDA_HOME="${CUDA_HOME:-/usr/local/cuda}"
+  export PATH="$CUDA_HOME/bin:$PATH"
   export PYTHONPATH="$EDGELLM_SRC:${PYTHONPATH:-}"
+
+  if [ "${USE_CURRENT_ENV:-0}" = "1" ]; then
+    return 0
+  fi
+  if [ -f "$ACC_ROOT/venv-export/bin/activate" ]; then
+    # shellcheck disable=SC1091
+    source "$ACC_ROOT/venv-export/bin/activate"
+    return 0
+  fi
+  if [ -f "$ACC_ROOT/venv/bin/activate" ]; then
+    activate_venv
+  fi
+}
+
+setup_edgellm_env() {
+  setup_export_env
   if [ -f "$EDGELLM_PLUGIN" ]; then
     export EDGELLM_PLUGIN_PATH="$EDGELLM_PLUGIN"
   fi
@@ -54,15 +71,24 @@ onnx_export_ready() {
 }
 
 require_export_tools() {
-  setup_edgellm_env
+  setup_export_env
   if ! command -v tensorrt-edgellm-export >/dev/null 2>&1; then
-    echo "[ERROR] 未找到 tensorrt-edgellm-export，请先运行: bash setup_edgellm.sh" >&2
+    echo "[ERROR] 未找到 tensorrt-edgellm-export。" >&2
+    if [ -f "$ACC_ROOT/venv-export/bin/activate" ] || [ "${USE_CURRENT_ENV:-0}" = "1" ]; then
+      echo "  请先运行: bash acc/setup_export_host.sh" >&2
+    elif [ -f "$ACC_ROOT/venv/bin/activate" ]; then
+      echo "  Orin: bash setup_edgellm.sh" >&2
+      echo "  x86:  bash acc/setup_export_host.sh" >&2
+    else
+      echo "  x86:  bash acc/setup_export_host.sh" >&2
+      echo "  Orin: bash setup_edgellm.sh" >&2
+    fi
     return 1
   fi
 }
 
 require_torch_onnx_export() {
-  setup_edgellm_env
+  setup_export_env
   python3 - <<'PY'
 import inspect
 import sys

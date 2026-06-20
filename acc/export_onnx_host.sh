@@ -2,9 +2,9 @@
 # 在 x86 Linux + NVIDIA GPU 上导出 Edge-LLM ONNX（Orin 无法导出）
 #
 # 用法（x86 主机）:
-#   export QWEN_MODEL_DIR=/path/to/Qwen2.5-0.5B-Instruct
-#   bash acc/export_onnx_host.sh              # 本机 venv（需 torch>=2.12）
-#   bash acc/export_onnx_host.sh --docker     # 推荐：NVIDIA PyTorch 容器
+#   bash acc/setup_export_host.sh --conda   # 先装依赖（推荐，Docker 不可用时）
+#   USE_CURRENT_ENV=1 bash acc/export_onnx_host.sh
+#   bash acc/export_onnx_host.sh --docker   # 需 nvidia-container-toolkit
 #
 # Docker GPU 模式（可选）:
 #   export DOCKER_GPU_MODE=runtime   # 绕过 --gpus CDI 问题
@@ -47,28 +47,27 @@ bash /workspace/acc/export_onnx_host.sh --in-container
 
 print_docker_gpu_fix() {
   cat <<'EOF'
-[ERROR] Docker 无法挂载 GPU（CDI / nvidia-container-toolkit 未配置）。
+[ERROR] Docker 无法挂载 GPU（未安装 nvidia-container-toolkit / CDI 未配置）。
 
-修复方式（任选其一）:
+推荐：不用 Docker，直接在本机导出（0.5B 单卡足够）:
 
-1) 使用 legacy runtime（通常最快生效）:
-   export DOCKER_GPU_MODE=runtime
-   bash acc/export_onnx_host.sh --docker
+  bash acc/setup_export_host.sh --conda    # 安装到当前 sam3 环境
+  USE_CURRENT_ENV=1 bash acc/export_onnx_host.sh
 
-2) 生成 CDI spec 并重启 Docker:
-   sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
-   sudo nvidia-ctk runtime configure --runtime=docker --cdi.enabled
-   sudo systemctl restart docker
-   nvidia-ctk cdi list | grep nvidia.com/gpu
-   bash acc/export_onnx_host.sh --docker
+或独立 venv:
 
-3) 不用 Docker，在本机 venv/conda 安装 torch>=2.12 后直接导出:
-   pip install torch==2.12.0  # 或容器同版本
-   bash acc/export_onnx_host.sh
+  bash acc/setup_export_host.sh
+  bash acc/export_onnx_host.sh
 
-验证 Docker GPU:
-   docker run --rm --runtime=nvidia -e NVIDIA_VISIBLE_DEVICES=all \
-     nvcr.io/nvidia/cuda:12.6.0-base-ubuntu22.04 nvidia-smi
+修复 Docker GPU（可选，一次性）:
+
+  bash acc/setup_export_host.sh --docker-toolkit
+  bash acc/export_onnx_host.sh --docker
+
+手动验证:
+
+  docker run --rm --runtime=nvidia -e NVIDIA_VISIBLE_DEVICES=all \
+    nvcr.io/nvidia/cuda:12.6.0-base-ubuntu22.04 nvidia-smi
 EOF
 }
 

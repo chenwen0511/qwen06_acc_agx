@@ -51,12 +51,19 @@ bash setup_edgellm.sh
 
 Edge-LLM 的 ONNX 导出需要 **PyTorch ≥ 2.12**（dynamo + `dynamic_shapes`），Jetson Orin 的 JetPack wheel 最高仅 2.5，**无法在 Orin 上导出**。官方流程：在 x86 GPU 主机（或 Jetson Thor）导出，再把 ONNX 拷到 Orin。
 
-**在 x86 GPU 主机上**（推荐 Docker）：
+**在 x86 GPU 主机上**（Docker 未配置时推荐本机导出）：
 
 ```bash
 export QWEN_MODEL_DIR=/path/to/Qwen2.5-0.5B-Instruct
-bash acc/export_onnx_host.sh --docker
+bash acc/setup_export_host.sh --conda
+USE_CURRENT_ENV=1 bash acc/export_onnx_host.sh
 # 将 acc/workspace/onnx/ scp 到 Orin 同路径
+```
+
+Docker 导出（需先 `bash acc/setup_export_host.sh --docker-toolkit`）：
+
+```bash
+bash acc/export_onnx_host.sh --docker
 ```
 
 **在 Orin 上**（构建引擎 + 推理，ONNX 到位后）：

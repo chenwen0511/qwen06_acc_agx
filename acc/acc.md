@@ -64,9 +64,11 @@ Orin 上 JetPack PyTorch 2.5 不支持 Edge-LLM 的 dynamo 导出 API。在 **x8
 
 ```bash
 export QWEN_MODEL_DIR=/path/to/Qwen2.5-0.5B-Instruct
-bash acc/export_onnx_host.sh --docker   # 推荐
-# 或本机 venv + torch>=2.12: bash acc/export_onnx_host.sh
+bash acc/setup_export_host.sh --conda
+USE_CURRENT_ENV=1 bash acc/export_onnx_host.sh
 ```
+
+或使用独立 venv：`bash acc/setup_export_host.sh && bash acc/export_onnx_host.sh`
 
 拷回 Orin：
 
@@ -125,6 +127,17 @@ SKIP_HF=1 bash acc/run_compare.sh
 ---
 
 ## 常见问题
+
+### Docker `unknown or invalid runtime name: nvidia`
+
+未安装 nvidia-container-toolkit。推荐改走本机导出：
+
+```bash
+bash acc/setup_export_host.sh --conda
+USE_CURRENT_ENV=1 bash acc/export_onnx_host.sh
+```
+
+或一次性修复 Docker：`bash acc/setup_export_host.sh --docker-toolkit`
 
 ### Docker `failed to discover GPU vendor from CDI`
 
