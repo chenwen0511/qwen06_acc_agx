@@ -1,0 +1,8 @@
+{
+  "default": "short",
+  "prompts": {
+    "short": "用一句话介绍 NVIDIA Jetson AGX Orin。",
+    "medium": "请详细说明在边缘设备上部署大语言模型时，Transformers 与 TensorRT-LLM 的主要差异，包括延迟、吞吐量和工程复杂度。",
+    "long": "你是一名嵌入式 AI 工程师。请撰写一份面向技术读者的短文，比较在 Jetson AGX Orin 上使用 Hugging Face Transformers 与 TensorRT-LLM 部署 Qwen2.5-0.5B-Instruct 的优缺点，并给出 benchmark 指标建议（TTFT、tokens/s、显存占用、GPU 利用率）。"
+  }
+}

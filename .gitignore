@@ -1,0 +1,8 @@
+venv/
+lib/
+third_party/
+__pycache__/
+*.pyc
+results/
+acc/workspace/
+*.tar.xz

@@ -1,0 +1,8 @@
+# Qwen2.5-0.5B AGX inference dependencies
+# PyTorch: 必须使用 Jetson wheel，见 setup_env.sh
+transformers>=4.45.0
+accelerate>=0.34.0
+sentencepiece>=0.2.0
+safetensors>=0.4.0
+numpy<2
+psutil>=5.9.0
