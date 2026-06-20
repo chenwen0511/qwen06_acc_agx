@@ -126,6 +126,23 @@ SKIP_HF=1 bash acc/run_compare.sh
 
 ## 常见问题
 
+### Docker `failed to discover GPU vendor from CDI`
+
+主机 `nvidia-smi` 正常但 Docker 报 CDI 错误时，优先试 legacy runtime：
+
+```bash
+export DOCKER_GPU_MODE=runtime
+bash acc/export_onnx_host.sh --docker
+```
+
+或修复 CDI：
+
+```bash
+sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
+sudo nvidia-ctk runtime configure --runtime=docker --cdi.enabled
+sudo systemctl restart docker
+```
+
 ### `TypeError: export() got an unexpected keyword argument 'dynamic_shapes'`
 
 Orin venv 的 PyTorch 2.5 过旧。请在 x86 GPU 主机运行 `bash acc/export_onnx_host.sh --docker`，再将 `acc/workspace/onnx/` 拷回 Orin。
