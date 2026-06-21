@@ -152,6 +152,7 @@ TensorRT Edge-LLM 安装完成。
   bash acc/infer_edgellm.sh
 
 ONNX 导出需在 x86 GPU 主机完成：
-  bash acc/export_onnx_host.sh --docker
+  bash acc/setup_export_host.sh --conda
+  USE_CURRENT_ENV=1 bash acc/export_onnx_host.sh
 
 EOF
