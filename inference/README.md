@@ -94,6 +94,88 @@ bash inference/setup_pybind.sh
 BACKEND=pybind bash inference/serve.sh
 ```
 
+### curl 调用（需先 `bash inference/serve.sh`）
+
+默认地址 `http://127.0.0.1:7860`，远程板子请把 host 换成 `<板子IP>`。
+
+**健康检查**
+
+```bash
+curl -s http://127.0.0.1:7860/api/health | python3 -m json.tool
+```
+
+**非流式：一次返回完整 JSON**
+
+```bash
+curl -s http://127.0.0.1:7860/api/chat \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "prompt": "用一句话介绍 NVIDIA Jetson AGX Orin。",
+    "max_new_tokens": 128,
+    "temperature": 0,
+    "backend": "subprocess"
+  }' | python3 -m json.tool
+```
+
+响应示例：
+
+```json
+{
+  "text": "……模型回复……",
+  "finish_reason": "stop",
+  "metrics": {
+    "wall_ms": 1542.0,
+    "ttft_ms": 39.0,
+    "tokens_per_sec": 33.7
+  },
+  "backend": "subprocess"
+}
+```
+
+**流式：SSE（Server-Sent Events）**
+
+```bash
+curl -N http://127.0.0.1:7860/api/chat/stream \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: text/event-stream' \
+  -d '{
+    "prompt": "用一句话介绍 Jetson。",
+    "max_new_tokens": 128,
+    "backend": "auto"
+  }'
+```
+
+SSE 事件类型（每行 `data: {...}`）：
+
+| type | 含义 |
+|------|------|
+| `status` | 开始推理 |
+| `metrics` | TTFT / tok/s / wall 时间 |
+| `token` | 增量文本片段 |
+| `done` | 完整回复 |
+| `error` | 错误信息 |
+
+只提取最终文本（需 `jq`）：
+
+```bash
+curl -N -s http://127.0.0.1:7860/api/chat/stream \
+  -H 'Content-Type: application/json' \
+  -d '{"prompt":"你好","max_new_tokens":64,"backend":"subprocess"}' \
+  | while IFS= read -r line; do
+      case "$line" in
+        data:\ *) echo "${line#data: }" ;;
+      esac
+    done | jq -r 'select(.type=="done") | .text'
+```
+
+指定 backend / 更长输出：
+
+```bash
+curl -s http://127.0.0.1:7860/api/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"prompt":"解释 Edge-LLM","max_new_tokens":256,"backend":"pybind"}'
+```
+
 Python 单次推理（等价 `run.sh`）：
 
 ```bash
