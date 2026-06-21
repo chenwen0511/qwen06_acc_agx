@@ -1,5 +1,46 @@
 # Qwen2.5-0.5B · Jetson AGX Orin 推理加速
 
+## 最快部署（内网文件服务器 → 一键上线）
+
+预打包产物（Edge-LLM **engine + `llm_inference` + plugin**，已含 build 结果，**无需** export ONNX、**无需** `llm_build`）：
+
+| 项 | 值 |
+|----|-----|
+| 服务器 | `192.168.100.147` |
+| 用户 | `ubuntu` |
+| 路径 | `/home/ubuntu/stephen/02-weight/qwen06_edgellm_orin.tar.gz` |
+
+在 **Jetson AGX Orin**（JetPack 6.x）上：
+
+```bash
+git clone <repo-url> qwen06_acc_agx
+cd qwen06_acc_agx
+
+# 1. 从内网服务器拉取预打包产物
+mkdir -p inference/artifacts
+scp ubuntu@192.168.100.147:/home/ubuntu/stephen/02-weight/qwen06_edgellm_orin.tar.gz \
+    inference/artifacts/
+
+# 2. 安装并启动 Web 推理服务
+bash inference/install.sh
+bash inference/serve.sh
+```
+
+浏览器访问：`http://<本机IP>:7860/`（默认端口 7860）
+
+命令行试跑：`bash inference/run.sh`
+
+后台 Web 服务：
+
+```bash
+nohup bash inference/serve.sh > inference/output/serve.log 2>&1 &
+curl -s http://127.0.0.1:7860/api/health | python3 -m json.tool
+```
+
+> 要求：目标板与打包机同为 **AGX Orin + 同 JetPack**（本包由 `inference/pack_artifacts.sh` 生成）。若 JetPack 不一致，需在新板重新 build 引擎，见 [完整流程](#完整使用流程)。
+
+---
+
 在 **NVIDIA Jetson AGX Orin** 上，将 **Qwen2.5-0.5B-Instruct** 从 Hugging Face **Transformers** 基线迁移到 **TensorRT Edge-LLM** FP16 引擎，完成 **导出 → 构建 → 推理 → 性能对比 → 多板部署** 的全流程工程化脚本。
 
 默认模型路径（可通过 `QWEN_MODEL_DIR` 覆盖）：
