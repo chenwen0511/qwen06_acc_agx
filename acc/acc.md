@@ -88,18 +88,12 @@ scp -r acc/workspace/onnx/ admin@<orin-ip>:~/stephen/01-code/qwen06_acc_agx/acc/
 
 Orin 上若 ONNX 已存在，`bash acc/export_onnx.sh` 会直接跳过。
 
-### 2C. ModelScope 下载预转换 ONNX（Optimum 格式）
-
-模型页：[Qwen2.5-0.5B-Instruct-ONNX-MHA](https://modelscope.cn/models/onnx-community/Qwen2.5-0.5B-Instruct-ONNX-MHA)
+也可使用 tarball / fetch 脚本：
 
 ```bash
-pip install modelscope
-bash acc/download_onnx_modelscope.sh
+bash acc/pack_edgellm_onnx.sh              # 首块打包
+bash acc/fetch_edgellm_onnx.sh            # 新板解压 acc/artifacts/edgellm_onnx.tar.gz
 ```
-
-产出：`acc/workspace/onnx-modelscope/model_fp16.onnx` 及 tokenizer 文件。
-
-**注意**：此为 HuggingFace Optimum / Transformers.js 格式，**不能**直接用于 `acc/build_engine.sh`。Edge-LLM 需要 `onnx/llm/` 下的 `model.onnx` + `model.onnx.data` + `embedding.safetensors` 等 sidecar。无 x86 时请用 **2A** 拷贝 Edge-LLM ONNX，勿与 ModelScope Optimum ONNX 混淆。
 
 ---
 
@@ -225,7 +219,8 @@ acc/
 ├── common.sh
 ├── export_onnx.sh
 ├── export_onnx_host.sh
-├── download_onnx_modelscope.sh
+├── fetch_edgellm_onnx.sh
+├── pack_edgellm_onnx.sh
 ├── build_engine.sh
 ├── infer_edgellm.sh
 ├── benchmark_edgellm.py

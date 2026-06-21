@@ -2,6 +2,8 @@
 
 在**已跑通的首块 AGX** 上打包引擎与 C++ runtime，拷到**新 AGX** 即可推理，**无需 Python venv、无需重新 export ONNX**（两块板均为 AGX Orin + 同 JetPack 时通常可直接用）。
 
+**一键部署（环境 + ONNX + Engine + Web）**：在工程根目录执行 `bash onekey_deploy.sh`（需 `acc/artifacts/edgellm_onnx.tar.gz` 或 `ONNX_SRC`）。
+
 ## 前提
 
 | 项 | 要求 |

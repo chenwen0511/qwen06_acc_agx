@@ -1,6 +1,5 @@
 #!/bin/bash
-# Orin 侧 ONNX 检查（Edge-LLM 格式需在 x86 export，或 scp 已有 acc/workspace/onnx/）
-# 预转换 Optimum ONNX 见 acc/download_onnx_modelscope.sh（不能直用于 build_engine）
+# Orin 侧 ONNX 检查（Edge-LLM 格式需在 x86 export，或 scp / fetch_edgellm_onnx）
 set -euo pipefail
 
 source "$(cd "$(dirname "$0")" && pwd)/common.sh"

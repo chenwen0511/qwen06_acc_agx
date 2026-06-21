@@ -28,7 +28,7 @@
 
 Edge-LLM 的 ONNX 导出依赖 PyTorch **≥ 2.12**（`torch.export` + `dynamic_shapes`）。Jetson Orin JetPack 官方 wheel 最高 **PyTorch 2.5**，无法在 Orin 上完成 dynamo 导出。
 
-因此采用 **双机流水线**（无 x86 GPU 时，可 **scp 已有 `acc/workspace/onnx/`** 跳过 export，或从 [ModelScope 下载 Optimum ONNX](https://modelscope.cn/models/onnx-community/Qwen2.5-0.5B-Instruct-ONNX-MHA) 作参考，见 [步骤 2](#步骤-2准备-onnx三选一)）：
+因此采用 **双机流水线**（无 x86 GPU 时，可 **scp 已有 `acc/workspace/onnx/`** 或 `acc/artifacts/edgellm_onnx.tar.gz` 跳过 export，见 [步骤 2](#步骤-2准备-onnx)）：
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -79,7 +79,8 @@ Qwen2.5 属于 Edge-LLM 官方支持的 Qwen2/Qwen2.5 系列，见 [Supported Mo
 |------|------|
 | `acc/setup_export_host.sh` | x86 导出环境（torch 2.12 + torchvision 0.27，支持 `--conda` 或独立 `venv-export/`） |
 | `acc/export_onnx_host.sh` | x86 GPU 本机导出 ONNX（Edge-LLM 格式） |
-| `acc/download_onnx_modelscope.sh` | 从 ModelScope 下载预转换 ONNX（见下方格式说明） |
+| `acc/fetch_edgellm_onnx.sh` | 获取 Edge-LLM ONNX（tar / URL / scp） |
+| `acc/pack_edgellm_onnx.sh` | 打包 Edge-LLM ONNX 供新板使用 |
 | `acc/export_onnx.sh` | Orin 侧检查 ONNX 是否就位 |
 | `setup_edgellm.sh` | clone Edge-LLM、安装 Python 工具、Orin 编译 C++ runtime |
 | `acc/build_engine.sh` | `llm_build` 构建 FP16 引擎 |
@@ -159,53 +160,30 @@ source venv/bin/activate
 python infer_hf.py --warmup 2 --runs 5 --max-new-tokens 128
 ```
 
-### 步骤 2：准备 ONNX（三选一）
+### 步骤 2：准备 ONNX
 
-Edge-LLM 构建引擎需要 **Edge-LLM 专用 ONNX** 目录 `acc/workspace/onnx/llm/`（含 `model.onnx`、`model.onnx.data`、`embedding.safetensors` 等）。与 ModelScope 上的 Optimum ONNX **不是同一格式**。
+Edge-LLM 构建引擎需要目录 `acc/workspace/onnx/llm/`（含 `model.onnx`、`model.onnx.data`、`embedding.safetensors` 等）。
 
-#### 方式 A：跳过 x86 export — 拷贝已有 Edge-LLM ONNX（推荐）
-
-若同事/首块 Orin 已跑过 `export_onnx_host.sh`，直接拷整个目录：
+#### 方式 A：跳过 x86 export — 拷贝或 tarball（推荐）
 
 ```bash
-scp -r admin@<已有机器IP>:~/stephen/01-code/qwen06_acc_agx/acc/workspace/onnx/ \
-    acc/workspace/
+# scp 目录
+scp -r admin@<已有机器IP>:~/stephen/01-code/qwen06_acc_agx/acc/workspace/onnx/ acc/workspace/
+
+# 或 tarball（首块: bash acc/pack_edgellm_onnx.sh）
+scp acc/artifacts/edgellm_onnx.tar.gz admin@<新板>:~/.../acc/artifacts/
+bash acc/fetch_edgellm_onnx.sh
 ```
 
-#### 方式 B：x86 本机 export（无现成 ONNX 时）
+#### 方式 B：x86 本机 export
 
 ```bash
 export QWEN_MODEL_DIR=/path/to/Qwen2.5-0.5B-Instruct
 bash acc/setup_export_host.sh --conda
 USE_CURRENT_ENV=1 bash acc/export_onnx_host.sh
-# 或独立 venv: bash acc/setup_export_host.sh && bash acc/export_onnx_host.sh
-```
-
-拷到 Orin：
-
-```bash
+# 或: bash acc/setup_export_host.sh && bash acc/export_onnx_host.sh
 scp -r acc/workspace/onnx/ admin@<orin-ip>:~/stephen/01-code/qwen06_acc_agx/acc/workspace/
 ```
-
-#### 方式 C：ModelScope 下载预转换 ONNX
-
-模型页：[Qwen2.5-0.5B-Instruct-ONNX-MHA（ModelScope）](https://modelscope.cn/models/onnx-community/Qwen2.5-0.5B-Instruct-ONNX-MHA)
-
-```bash
-pip install modelscope
-bash acc/download_onnx_modelscope.sh
-# 默认下载 FP16 变体（约 947MB）到 acc/workspace/onnx-modelscope/
-ONNX_VARIANT=model_q4f16 bash acc/download_onnx_modelscope.sh   # 更小量化版
-```
-
-| 对比项 | Edge-LLM export（方式 A/B） | ModelScope Optimum ONNX（方式 C） |
-|--------|----------------------------|----------------------------------|
-| 目录 | `acc/workspace/onnx/llm/` | `acc/workspace/onnx-modelscope/` |
-| 典型文件 | `model.onnx` + `model.onnx.data` + `embedding.safetensors` | `onnx/model_fp16.onnx` 单文件 |
-| 用途 | **`acc/build_engine.sh`（本仓库加速路径）** | ONNX Runtime / Web，**不能**直接 `llm_build` |
-| 跳过 x86 export | ✅（方式 A 拷贝即可） | ⚠️ 仅跳过 Optimum 转换，**不能**替代 Edge-LLM ONNX |
-
-> 无 x86 GPU 且要走 Edge-LLM 加速：优先 **方式 A** 获取已 export 的 `acc/workspace/onnx/`；ModelScope 链接便于获取 HF Optimum 格式权重，或作 ONNX Runtime 基线参考。
 
 ### 步骤 3：Orin — 安装 Edge-LLM + 构建引擎
 
@@ -246,7 +224,38 @@ WARMUP=2 RUNS=5 bash acc/run_prompts.sh
 
 ### 步骤 5：部署到其他 AGX / 在线服务
 
-**打包到新板（最小部署）**
+#### 一键部署（推荐）
+
+在 **Jetson AGX Orin** 上，准备好 Edge-LLM ONNX tarball 后：
+
+```bash
+# 首块机器打包 ONNX（一次性）
+bash acc/pack_edgellm_onnx.sh
+scp acc/artifacts/edgellm_onnx.tar.gz admin@<新板>:~/stephen/01-code/qwen06_acc_agx/acc/artifacts/
+
+# 新板一键：环境 → ONNX → Engine → Web 上线
+bash onekey_deploy.sh
+# 后台服务: SERVE_BACKGROUND=1 bash onekey_deploy.sh
+```
+
+`onekey_deploy.sh` 四步：
+
+| 步骤 | 内容 |
+|------|------|
+| 1 环境 | `setup_env.sh` + `setup_edgellm.sh` + Web 依赖 |
+| 2 ONNX | `acc/fetch_edgellm_onnx.sh`（本地 tar / URL / scp） |
+| 3 Engine | `acc/build_engine.sh` |
+| 4 上线 | 同步 `inference/runtime/` + 试跑 + `inference/serve.sh` |
+
+ONNX 未打包时也可：
+
+```bash
+ONNX_SRC=admin@<首块IP>:~/stephen/01-code/qwen06_acc_agx/acc/workspace/onnx bash onekey_deploy.sh
+# 或
+EDGELLM_ONNX_URL=https://.../edgellm_onnx.tar.gz bash onekey_deploy.sh
+```
+
+#### 手动打包部署
 
 ```bash
 bash inference/pack_artifacts.sh
@@ -289,6 +298,7 @@ bash inference/serve.sh
 ```
 qwen06_acc_agx/
 ├── README.md                 # 本文档
+├── onekey_deploy.sh          # AGX 一键：环境 → ONNX → Engine → Web
 ├── setup_env.sh              # Orin Transformers venv
 ├── setup_edgellm.sh          # Edge-LLM clone + C++ 编译
 ├── infer_hf.py               # HF benchmark
@@ -299,7 +309,8 @@ qwen06_acc_agx/
 │   ├── setup_export_host.sh
 │   ├── export_onnx.sh
 │   ├── export_onnx_host.sh
-│   ├── download_onnx_modelscope.sh  # ModelScope 预转换 ONNX
+│   ├── fetch_edgellm_onnx.sh
+│   ├── pack_edgellm_onnx.sh
 │   ├── build_engine.sh
 │   ├── infer_edgellm.sh
 │   ├── benchmark_edgellm.py

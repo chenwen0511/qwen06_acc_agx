@@ -15,9 +15,6 @@ if [ ! -d "$ONNX_LLM_DIR" ]; then
   echo "[ERROR] ONNX 不存在，请先导出 ONNX：" >&2
   echo "  方式 1: 从已有机器拷贝 Edge-LLM ONNX: scp -r .../acc/workspace/onnx/ acc/workspace/" >&2
   echo "  方式 2: x86 export: bash acc/setup_export_host.sh && bash acc/export_onnx_host.sh" >&2
-  echo "  方式 3: ModelScope 预转换 ONNX（Optimum，不能直用于 llm_build）:" >&2
-  echo "          https://modelscope.cn/models/onnx-community/Qwen2.5-0.5B-Instruct-ONNX-MHA" >&2
-  echo "          bash acc/download_onnx_modelscope.sh" >&2
   echo "  拷回 Orin 后: bash acc/build_engine.sh" >&2
   exit 1
 fi
