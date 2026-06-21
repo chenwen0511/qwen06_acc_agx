@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Qwen Edge-LLM Chat</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #1a2332;
+      --border: #2d3a4f;
+      --text: #e7ecf3;
+      --muted: #8b9cb3;
+      --accent: #3b82f6;
+      --user: #1e3a5f;
+      --bot: #162032;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    header {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+      background: var(--panel);
+    }
+    header h1 { margin: 0; font-size: 1.1rem; font-weight: 600; }
+    header p { margin: 6px 0 0; color: var(--muted); font-size: 0.85rem; }
+    #chat {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .msg {
+      max-width: min(820px, 92%);
+      padding: 12px 14px;
+      border-radius: 12px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .msg.user { align-self: flex-end; background: var(--user); }
+    .msg.bot { align-self: flex-start; background: var(--bot); border: 1px solid var(--border); }
+    .msg.system { align-self: center; color: var(--muted); font-size: 0.85rem; background: transparent; }
+    footer {
+      border-top: 1px solid var(--border);
+      background: var(--panel);
+      padding: 14px 20px 18px;
+    }
+    .controls {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 10px;
+      flex-wrap: wrap;
+    }
+    .controls label {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+    .controls input, .controls select {
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 6px 8px;
+    }
+    .input-row { display: flex; gap: 10px; }
+    textarea {
+      flex: 1;
+      min-height: 56px;
+      max-height: 160px;
+      resize: vertical;
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px 14px;
+      font: inherit;
+    }
+    button {
+      background: var(--accent);
+      color: white;
+      border: none;
+      border-radius: 12px;
+      padding: 0 18px;
+      font-weight: 600;
+      cursor: pointer;
+      min-width: 88px;
+    }
+    button:disabled { opacity: 0.55; cursor: not-allowed; }
+    .cursor::after { content: "▍"; animation: blink 1s step-end infinite; color: var(--accent); }
+    @keyframes blink { 50% { opacity: 0; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Qwen2.5-0.5B · TensorRT Edge-LLM</h1>
+    <p>流式在线推理 · 默认 Edge-LLM 引擎（subprocess 完成后 token 回放；编译 pybind 后可真流式）</p>
+  </header>
+
+  <main id="chat"></main>
+
+  <footer>
+    <div class="controls">
+      <label>max tokens <input id="maxTokens" type="number" value="128" min="1" max="2048" /></label>
+      <label>backend
+        <select id="backend">
+          <option value="auto">auto</option>
+          <option value="subprocess">subprocess</option>
+          <option value="pybind">pybind</option>
+          <option value="hf">hf</option>
+        </select>
+      </label>
+    </div>
+    <div class="input-row">
+      <textarea id="prompt" placeholder="输入问题，Enter 发送，Shift+Enter 换行"></textarea>
+      <button id="sendBtn">发送</button>
+    </div>
+  </footer>
+
+  <script>
+    const chat = document.getElementById("chat");
+    const promptEl = document.getElementById("prompt");
+    const sendBtn = document.getElementById("sendBtn");
+    const maxTokensEl = document.getElementById("maxTokens");
+    const backendEl = document.getElementById("backend");
+
+    function addMessage(role, text, streaming = false) {
+      const div = document.createElement("div");
+      div.className = `msg ${role}` + (streaming ? " cursor" : "");
+      div.textContent = text;
+      chat.appendChild(div);
+      chat.scrollTop = chat.scrollHeight;
+      return div;
+    }
+
+    async function sendPrompt() {
+      const prompt = promptEl.value.trim();
+      if (!prompt) return;
+
+      sendBtn.disabled = true;
+      addMessage("user", prompt);
+      promptEl.value = "";
+
+      const botEl = addMessage("bot", "", true);
+      let fullText = "";
+
+      try {
+        const resp = await fetch("/api/chat/stream", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            prompt,
+            max_new_tokens: Number(maxTokensEl.value) || 128,
+            backend: backendEl.value,
+            temperature: 0,
+          }),
+        });
+
+        if (!resp.ok || !resp.body) {
+          throw new Error(`HTTP ${resp.status}`);
+        }
+
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const parts = buffer.split("\n\n");
+          buffer = parts.pop() || "";
+
+          for (const part of parts) {
+            const line = part.split("\n").find((l) => l.startsWith("data: "));
+            if (!line) continue;
+            const event = JSON.parse(line.slice(6));
+
+            if (event.type === "status") {
+              addMessage("system", event.message);
+            } else if (event.type === "token") {
+              fullText += event.text || "";
+              botEl.textContent = fullText;
+              chat.scrollTop = chat.scrollHeight;
+            } else if (event.type === "metrics") {
+              const ttft = event.ttft_ms != null ? `${event.ttft_ms.toFixed(1)} ms TTFT` : "";
+              const tps = event.tokens_per_sec != null ? `${event.tokens_per_sec.toFixed(1)} tok/s` : "";
+              addMessage("system", [ttft, tps, `${Math.round(event.wall_ms || 0)} ms wall`].filter(Boolean).join(" · "));
+            } else if (event.type === "error") {
+              throw new Error(event.message || "推理失败");
+            } else if (event.type === "done") {
+              fullText = event.text || fullText;
+              botEl.classList.remove("cursor");
+              botEl.textContent = fullText;
+            }
+          }
+        }
+      } catch (err) {
+        botEl.classList.remove("cursor");
+        botEl.textContent = fullText || `[错误] ${err.message}`;
+      } finally {
+        sendBtn.disabled = false;
+        promptEl.focus();
+      }
+    }
+
+    sendBtn.addEventListener("click", sendPrompt);
+    promptEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        sendPrompt();
+      }
+    });
+
+    fetch("/api/health")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.status !== "ok") {
+          addMessage("system", "运行时未就绪，请先 bash inference/install.sh");
+        }
+      })
+      .catch(() => {});
+  </script>
+</body>
+</html>

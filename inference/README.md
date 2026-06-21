@@ -43,6 +43,7 @@ qwen06_acc_agx/
 ├── inference/
 │   ├── install.sh
 │   ├── run.sh
+│   ├── infer.py              # Python 推理入口（等价 run.sh）
 │   ├── common.sh
 │   └── artifacts/qwen06_edgellm_orin.tar.gz
 └── prompts.json          # 可选，run.sh 用 PROMPT_KEY 时需要
@@ -69,6 +70,40 @@ MAX_NEW_TOKENS=256 bash inference/run.sh
 
 输出：`inference/output/output.json`
 
+### 流式 Web 界面
+
+```bash
+bash inference/install.sh          # 首次
+bash inference/serve.sh            # 默认 http://0.0.0.0:7860/
+# 局域网访问：http://<板子IP>:7860/
+```
+
+依赖：`pip install -r inference/requirements-web.txt`（`serve.sh` 会自动安装）
+
+| backend | 说明 |
+|---------|------|
+| `auto`（默认） | 有 pybind 则真流式，否则 subprocess 完成后按 token 回放 |
+| `subprocess` | 调用 `llm_inference`，适合第二块 AGX（无需 venv） |
+| `pybind` | 真 token 流式，需首块执行 `bash inference/setup_pybind.sh` |
+| `hf` | Transformers 真流式，需 `setup_env.sh` + 模型权重 |
+
+真流式（可选，首块 AGX 一次）：
+
+```bash
+bash inference/setup_pybind.sh
+BACKEND=pybind bash inference/serve.sh
+```
+
+Python 单次推理（等价 `run.sh`）：
+
+```bash
+python3 inference/infer.py
+python3 inference/infer.py --prompt '用一句话介绍 Jetson。'
+python3 inference/infer.py --prompt-key short --max-new-tokens 256
+python3 inference/infer.py --dump-profile   # 额外输出 TTFT / decode 吞吐
+python3 inference/infer.py --input-file inference/input.example.json
+```
+
 ---
 
 ## 备选：新板自行 build 引擎（无 tarball）
@@ -89,7 +124,13 @@ bash inference/run.sh
 |------|------|
 | `pack_artifacts.sh` | 首块 AGX 打包 |
 | `install.sh` | 新板解压到 `inference/runtime/` |
-| `run.sh` | 单次 `llm_inference` |
+| `run.sh` | 单次 `llm_inference`（bash） |
+| `infer.py` | 单次 `llm_inference`（Python） |
+| `serve.sh` | 流式 Chat Web 服务 |
+| `server.py` | FastAPI + SSE 后端 |
+| `engine.py` | 推理/流式引擎封装 |
+| `setup_pybind.sh` | 编译 pybind 真流式（可选） |
+| `web/index.html` | Chat 界面 |
 | `input.example.json` | 手写 input 参考 |
 | `runtime/` | 解压后目录（勿提交 git） |
 | `artifacts/` | tarball（勿提交 git） |
